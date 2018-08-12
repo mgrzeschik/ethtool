@@ -257,6 +257,10 @@ struct ethtool_tunable {
 enum phy_tunable_id {
 	ETHTOOL_PHY_ID_UNSPEC,
 	ETHTOOL_PHY_DOWNSHIFT,
+	ETHTOOL_PHY_TEST_MODE,
+	ETHTOOL_PHY_FAULT_DETECTION,
+	ETHTOOL_PHY_MANAGED_MODE,
+	ETHTOOL_PHY_SIGNAL_QUALITY,
 	/*
 	 * Add your fresh new phy tunable attribute above and remember to update
 	 * phy_tunable_strings[] in net/core/ethtool.c

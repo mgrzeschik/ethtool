@@ -4736,42 +4736,136 @@ static int do_get_phy_tunable(struct cmd_context *ctx)
 {
 	int argc = ctx->argc;
 	char **argp = ctx->argp;
-	u8 downshift_changed = 0;
 	int i;
+
+	struct {
+	        struct ethtool_tunable ds;
+	        u8 __store;
+	} cont8;
 
 	if (argc < 1)
 		exit_bad_args();
+
+	cont8.ds.cmd = ETHTOOL_PHY_GTUNABLE;
+	cont8.ds.len = 1;
+
 	for (i = 0; i < argc; i++) {
 		if (!strcmp(argp[i], "downshift")) {
-			downshift_changed = 1;
+			u8 count = 0;
 			i += 1;
 			if (i < argc)
 				exit_bad_args();
+
+			cont8.ds.id = ETHTOOL_PHY_DOWNSHIFT;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			if (send_ioctl(ctx, &cont8.ds) < 0) {
+				perror("Cannot Get PHY downshift count");
+				return 87;
+			}
+			count = *((u8 *)&cont8.ds.data[0]);
+			if (count)
+				fprintf(stdout, "Downshift count: %d\n", count);
+			else
+				fprintf(stdout, "Downshift disabled\n");
+
+		} else if (!strcmp(argp[i], "testmode")) {
+			u8 mode = {0};
+			i += 1;
+			if (i < argc)
+				exit_bad_args();
+
+			cont8.ds.id = ETHTOOL_PHY_TEST_MODE;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			if (send_ioctl(ctx, &cont8.ds) < 0) {
+				perror("Cannot Get PHY current TESTMODE");
+				return 87;
+			}
+			mode = *((u8 *)&cont8.ds.data[0]);
+			if (mode)
+				fprintf(stdout, "Current Testmode: %d\n", mode);
+			else
+				fprintf(stdout, "Testmode disabled\n");
+
+		} else if (!strcmp(argp[i], "cable_fault")) {
+			u8 cstatus = 0;
+			i += 1;
+			if (i < argc)
+				exit_bad_args();
+			cont8.ds.id = ETHTOOL_PHY_FAULT_DETECTION;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			if (send_ioctl(ctx, &cont8.ds) < 0) {
+				perror("Cannot Get PHY FAULT_DETECTION");
+				return 87;
+			}
+			cstatus = *((u8 *)&cont8.ds.data[0]);
+			if (cstatus == 3)
+				fprintf(stdout, "Cable fault: Open\n");
+			else if (cstatus == 2)
+				fprintf(stdout, "Cable fault: Short\n");
+			else
+				fprintf(stdout, "Cable OK\n");
+
+		} else if (!strcmp(argp[i], "managed")) {
+			u8 managed = 0;
+			i += 1;
+			if (i < argc)
+				exit_bad_args();
+			cont8.ds.id = ETHTOOL_PHY_MANAGED_MODE;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			if (send_ioctl(ctx, &cont8.ds) < 0) {
+				perror("Cannot Get PHY ETHTOOL_PHY_MANAGED_MODE");
+				return 87;
+			}
+			managed = *((u8 *)&cont8.ds.data[0]);
+			if (managed)
+				fprintf(stdout, "Managed Mode\n");
+			else
+				fprintf(stdout, "Autonomous Mode\n");
+
+		} else if (!strcmp(argp[i], "sqi")) {
+			u8 sqi = 0;
+			i += 1;
+			if (i < argc)
+				exit_bad_args();
+			cont8.ds.id = ETHTOOL_PHY_SIGNAL_QUALITY;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			if (send_ioctl(ctx, &cont8.ds) < 0) {
+				perror("Cannot Get PHY ETHTOOL_PHY_SIGNAL_QUALITY");
+				return 87;
+			}
+			sqi = *((u8 *)&cont8.ds.data[0]);
+			switch (sqi) {
+			case 0:
+				fprintf(stdout, "Signal Quality worse than A\n");
+				break;
+			case 1:
+				fprintf(stdout, "Signal Quality A\n");
+				break;
+			case 2:
+				fprintf(stdout, "Signal Quality B\n");
+				break;
+			case 3:
+				fprintf(stdout, "Signal Quality C\n");
+				break;
+			case 4:
+				fprintf(stdout, "Signal Quality D\n");
+				break;
+			case 5:
+				fprintf(stdout, "Signal Quality E\n");
+				break;
+			case 6:
+				fprintf(stdout, "Signal Quality F\n");
+				break;
+			case 7:
+				fprintf(stdout, "Signal Quality G\n");
+				break;
+			default:
+				fprintf(stdout, "invalid SQI mesured!\n");
+			}
+
 		} else  {
 			exit_bad_args();
 		}
-	}
-
-	if (downshift_changed) {
-		struct {
-			struct ethtool_tunable ds;
-			u8 __count;
-		} cont;
-		u8 count = 0;
-
-		cont.ds.cmd = ETHTOOL_PHY_GTUNABLE;
-		cont.ds.id = ETHTOOL_PHY_DOWNSHIFT;
-		cont.ds.type_id = ETHTOOL_TUNABLE_U8;
-		cont.ds.len = 1;
-		if (send_ioctl(ctx, &cont.ds) < 0) {
-			perror("Cannot Get PHY downshift count");
-			return 87;
-		}
-		count = *((u8 *)&cont.ds.data[0]);
-		if (count)
-			fprintf(stdout, "Downshift count: %d\n", count);
-		else
-			fprintf(stdout, "Downshift disabled\n");
 	}
 
 	return 0;
@@ -4910,56 +5004,83 @@ static int parse_named_u8(struct cmd_context *ctx, const char *name, u8 *val)
 static int do_set_phy_tunable(struct cmd_context *ctx)
 {
 	int err = 0;
-	u8 ds_cnt = DOWNSHIFT_DEV_DEFAULT_COUNT;
-	u8 ds_changed = 0, ds_has_cnt = 0, ds_enable = 0;
+	u8 ds_enable = 0;
+	u8 tm_enable = 0;
+	u8 m_enable = 0;
+
+	struct {
+	        struct ethtool_tunable ds;
+	        u8 __store;
+	} cont8;
 
 	if (ctx->argc == 0)
 		exit_bad_args();
 
+	cont8.ds.len = 1;
+	cont8.ds.cmd = ETHTOOL_PHY_STUNABLE;
+
 	/* Parse arguments */
 	while (ctx->argc) {
 		if (parse_named_bool(ctx, "downshift", &ds_enable)) {
-			ds_changed = 1;
+			u8 ds_has_cnt = 0;
+			u8 ds_cnt = {DOWNSHIFT_DEV_DEFAULT_COUNT};
 			ds_has_cnt = parse_named_u8(ctx, "count", &ds_cnt);
+			if (!ds_enable && ds_has_cnt) {
+				fprintf(stderr, "'count' may not be set when downshift "
+					        "is off.\n");
+				exit_bad_args();
+			}
+
+			if (ds_enable && ds_has_cnt && ds_cnt == 0) {
+				fprintf(stderr, "'count' may not be zero.\n");
+				exit_bad_args();
+			}
+			if (!ds_enable)
+				ds_cnt = DOWNSHIFT_DEV_DISABLE;
+
+			cont8.ds.id = ETHTOOL_PHY_DOWNSHIFT;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			*((u8 *)&cont8.ds.data[0]) = ds_cnt;
+
+		} else if (parse_named_bool(ctx, "testmode", &tm_enable)) {
+			u8 tm_val = 1;
+			u8 tm_has_val = 0;
+			tm_has_val = parse_named_u8(ctx, "mode", &tm_val);
+			if (tm_val > 6)
+				exit_bad_args();
+
+			if (!tm_enable && tm_has_val) {
+				fprintf(stderr, "'mode' may not be set when testmode"
+					        "is off.\n");
+				exit_bad_args();
+			}
+
+			if (tm_enable && tm_has_val && tm_val == 0) {
+				fprintf(stderr, "'mode' may not be zero.\n");
+				exit_bad_args();
+			}
+
+			if (!tm_enable)
+				tm_val = 0;
+
+			cont8.ds.id = ETHTOOL_PHY_TEST_MODE;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			*((u8 *)&cont8.ds.data[0]) = tm_val;
+
+		} else if (parse_named_bool(ctx, "managed", &m_enable)) {
+			cont8.ds.id = ETHTOOL_PHY_MANAGED_MODE;
+			cont8.ds.type_id = ETHTOOL_TUNABLE_U8;
+			*((u8 *)&cont8.ds.data[0]) = m_enable;
 		} else {
 			exit_bad_args();
 		}
 	}
 
-	/* Validate parameters */
-	if (ds_changed) {
-		if (!ds_enable && ds_has_cnt) {
-			fprintf(stderr, "'count' may not be set when downshift "
-				        "is off.\n");
-			exit_bad_args();
-		}
-
-		if (ds_enable && ds_has_cnt && ds_cnt == 0) {
-			fprintf(stderr, "'count' may not be zero.\n");
-			exit_bad_args();
-		}
-
-		if (!ds_enable)
-			ds_cnt = DOWNSHIFT_DEV_DISABLE;
-	}
-
 	/* Do it */
-	if (ds_changed) {
-		struct {
-			struct ethtool_tunable ds;
-			u8 __count;
-		} cont;
-
-		cont.ds.cmd = ETHTOOL_PHY_STUNABLE;
-		cont.ds.id = ETHTOOL_PHY_DOWNSHIFT;
-		cont.ds.type_id = ETHTOOL_TUNABLE_U8;
-		cont.ds.len = 1;
-		*((u8 *)&cont.ds.data[0]) = ds_cnt;
-		err = send_ioctl(ctx, &cont.ds);
-		if (err < 0) {
-			perror("Cannot Set PHY downshift count");
-			err = 87;
-		}
+	err = send_ioctl(ctx, &cont8.ds);
+	if (err < 0) {
+		perror("Cannot Set PHY downshift count");
+		err = 87;
 	}
 
 	return err;
